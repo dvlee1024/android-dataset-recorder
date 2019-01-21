@@ -8,6 +8,7 @@ import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
 import android.os.Environment;
+import android.os.SystemClock;
 import android.preference.PreferenceManager;
 
 import java.io.BufferedWriter;
@@ -66,11 +67,11 @@ public class IMUManager implements SensorEventListener {
 
         // Set event timestamp to current time in milliseconds
         // http://stackoverflow.com/a/9333605
-        event.timestamp = (new Date()).getTime() + (event.timestamp - System.nanoTime()) / 1000000L;
+//        event.timestamp = (new Date()).getTime() + (event.timestamp - System.nanoTime()) / 1000000L;
 
         // TODO: Figure out better way, for now just use the total time
         // https://code.google.com/p/android/issues/detail?id=56561
-        event.timestamp = new Date().getTime();
+//        event.timestamp = new Date().getTime();
 
         // Handle accelerometer reading
         if (event.sensor.getType() == Sensor.TYPE_ACCELEROMETER) {
@@ -90,9 +91,11 @@ public class IMUManager implements SensorEventListener {
             if(MainActivity.is_recording) {
 
                 // Create folder name
-                String filename = "data_imu.txt";
-                String path = Environment.getExternalStorageDirectory().getAbsolutePath()
-                        + "/dataset_recorder/" + MainActivity.folder_name + "/";
+                //String filename = "imu.txt";
+                String filename = "imu.txt";
+//                String path = Environment.getExternalStorageDirectory().getAbsolutePath()
+//                        + "/dataset_recorder/" + MainActivity.folder_name + "/";
+                String path = "/sdcard/dataset/" + MainActivity.timeName + "/";
 
                 // Create export file
                 new File(path).mkdirs();
@@ -107,9 +110,9 @@ public class IMUManager implements SensorEventListener {
                     BufferedWriter writer = new BufferedWriter(new FileWriter(dest, true));
 
                     // Master string of information
-                    String data = linear_time
-                            + "," + linear_data[0] + "," + linear_data[1] + "," + linear_data[2]
-                            + "," + angular_data[0] + "," + angular_data[1] + "," + angular_data[2];
+                    String data = linear_time / 1000 / 1000.0 / 1000.0
+                            + "," + linear_data[0] + "," + linear_data[1] + "," + linear_data[2];
+//                            + "," + angular_data[0] + "," + angular_data[1] + "," + angular_data[2];
 
                     // Appends the string to the file and closes
                     writer.write(data + "\n");

@@ -2,7 +2,6 @@ package io.rpng.recorder.activities;
 
 import android.content.Intent;
 import android.content.SharedPreferences;
-import android.content.pm.ActivityInfo;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.ImageFormat;
@@ -12,8 +11,8 @@ import android.media.Image;
 import android.media.ImageReader;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.SystemClock;
 import android.preference.PreferenceManager;
-import android.provider.MediaStore;
 import android.support.v7.app.AppCompatActivity;
 import android.support.v7.widget.Toolbar;
 import android.util.Log;
@@ -22,7 +21,6 @@ import android.view.MenuItem;
 import android.view.View;
 import android.widget.Button;
 import android.widget.ImageView;
-import android.widget.TextView;
 
 import java.io.BufferedWriter;
 import java.io.ByteArrayOutputStream;
@@ -30,13 +28,12 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.FileWriter;
 import java.io.IOException;
-import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 
-import io.rpng.recorder.managers.CameraManager;
 import io.rpng.recorder.R;
+import io.rpng.recorder.managers.CameraManager;
 import io.rpng.recorder.managers.GPSManager;
 import io.rpng.recorder.managers.IMUManager;
 import io.rpng.recorder.views.AutoFitTextureView;
@@ -65,6 +62,8 @@ public class MainActivity extends AppCompatActivity {
     public static boolean is_recording;
     public static String folder_name;
 
+    public static long timeName = 0;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
 
@@ -86,7 +85,7 @@ public class MainActivity extends AppCompatActivity {
         // Create the camera manager
         mCameraManager = new CameraManager(this, mTextureView, camera2View);
         mImuManager = new IMUManager(this);
-        mGpsManager = new GPSManager(this);
+        //mGpsManager = new GPSManager(this);
 
         // Set our shared preferences
         sharedPreferences = PreferenceManager.getDefaultSharedPreferences(this);
@@ -114,15 +113,19 @@ public class MainActivity extends AppCompatActivity {
                 // If we are not recording we should start it
                 if(!is_recording) {
                     // Set our folder name
-                    SimpleDateFormat dateFormat = new SimpleDateFormat("yy-MM-dd HH:mm:ss");
+
+                    SimpleDateFormat dateFormat = new SimpleDateFormat("yyMMdd_HHmmss");
                     folder_name = dateFormat.format(new Date());
 
                     // Also change the text on the button so that it turns into the stop button
                     Button button_record = (Button) findViewById(R.id.button_record);
                     button_record.setText("Stop Recording");
 
+                    startTimestampRef = -1;
                     // Trigger the recording by changing the recording boolean
                     is_recording = true;
+
+                    timeName = SystemClock.elapsedRealtime() / 1000;
                 }
                 // Else we can assume we pressed the "stop recording" button
                 else {
@@ -138,6 +141,37 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
         });
+    }
+
+    private void delDir(String path){
+        File dir=new File(path);
+        if(dir.exists()){
+            File[] tmp=dir.listFiles();
+            for(int i=0;i<tmp.length;i++){
+                if(tmp[i].isDirectory()){
+                    delDir(path+"/"+tmp[i].getName());
+                }
+                else {
+                    tmp[i].delete();
+                }
+            }
+            dir.delete();
+        }
+    }
+
+    private void clearDir(String path){
+        File dir=new File(path);
+        if(dir.exists()){
+            File[] tmp=dir.listFiles();
+            for(int i=0;i<tmp.length;i++){
+                if(tmp[i].isDirectory()){
+                    delDir(path+"/"+tmp[i].getName());
+                }
+                else {
+                    tmp[i].delete();
+                }
+            }
+        }
     }
 
     @Override
@@ -158,9 +192,9 @@ public class MainActivity extends AppCompatActivity {
         mImuManager.register();
 
         // Start background thread
-        mGpsManager.startBackgroundThread();
+        //mGpsManager.startBackgroundThread();
         // Register google services
-        mGpsManager.register();
+        //mGpsManager.register();
     }
 
     @Override
@@ -176,21 +210,23 @@ public class MainActivity extends AppCompatActivity {
         mImuManager.unregister();
 
         // Stop background thread
-        mGpsManager.stopBackgroundThread();
+        //mGpsManager.stopBackgroundThread();
         // Remove gps listener
-        mGpsManager.unregister();
+        //mGpsManager.unregister();
 
         // Call the super
         super.onPause();
     }
 
+    static long startTimestampRef = -1;
     // Taken from OpenCamera project
     // URL: https://github.com/almalence/OpenCamera/blob/master/src/com/almalence/opencam/cameracontroller/Camera2Controller.java#L3455
     public final static ImageReader.OnImageAvailableListener imageAvailableListener = new ImageReader.OnImageAvailableListener() {
-
+        private long timeLast,timeCur;
+        private long sleepTime = 60;
+        private static final long MS_PER_FRAME = 100;
         @Override
         public void onImageAvailable(ImageReader ir) {
-
             // Contrary to what is written in Aptina presentation acquireLatestImage is not working as described
             // Google: Also, not working as described in android docs (should work the same as acquireNextImage in
             // our case, but it is not)
@@ -198,6 +234,9 @@ public class MainActivity extends AppCompatActivity {
 
             // Get the next image from the queue
             Image image = ir.acquireNextImage();
+            timeLast = timeCur;
+            timeCur = System.nanoTime();
+            long lastFrameSpendTime = (timeCur - timeLast)/1000/1000;
 
             // Collection of bytes of the image
             byte[] rez;
@@ -205,18 +244,24 @@ public class MainActivity extends AppCompatActivity {
             // Convert to NV21 format
             // https://github.com/bytedeco/javacv/issues/298#issuecomment-169100091
             ByteBuffer buffer0 = image.getPlanes()[0].getBuffer();
+            //ByteBuffer buffer1 = image.getPlanes()[1].getBuffer();
             ByteBuffer buffer2 = image.getPlanes()[2].getBuffer();
             int buffer0_size = buffer0.remaining();
+            //int buffer1_size = buffer1.remaining();
             int buffer2_size = buffer2.remaining();
             rez = new byte[buffer0_size + buffer2_size];
+//            rez = getYUV420Data(buffer0,buffer1,buffer2,image.getWidth(),image.getHeight(),
+//                    image.getPlanes()[0].getRowStride(),
+//                    image.getPlanes()[1].getRowStride(),
+//                    image.getPlanes()[1].getPixelStride());
 
             // Load the final data var with the actual bytes
             buffer0.get(rez, 0, buffer0_size);
             buffer2.get(rez, buffer0_size, buffer2_size);
+//            buffer2.get(rez, buffer0_size + buffer1_size, buffer2_size);
 
             // Byte output stream, so we can save the file
             ByteArrayOutputStream out = new ByteArrayOutputStream();
-
             // Create YUV image file
             YuvImage yuvImage = new YuvImage(rez, ImageFormat.NV21, image.getWidth(), image.getHeight(), null);
             yuvImage.compressToJpeg(new Rect(0, 0, image.getWidth(), image.getHeight()), 90, out);
@@ -232,12 +277,17 @@ public class MainActivity extends AppCompatActivity {
 
                 // Current timestamp of the event
                 // TODO: See if we can use image.getTimestamp()
-                long timestamp = new Date().getTime();
+//                long timestamp = new Date().getTime();
+                if(startTimestampRef <= 0){
+                    startTimestampRef = SystemClock.elapsedRealtimeNanos() - image.getTimestamp();
+                }
+                long timestamp = image.getTimestamp() + startTimestampRef;
 
                 // Create folder name
-                String filename = "data_image.txt";
-                String path = Environment.getExternalStorageDirectory().getAbsolutePath()
-                        + "/dataset_recorder/" + MainActivity.folder_name + "/";
+                String filename = "image.txt";
+//                String path = Environment.getExternalStorageDirectory().getAbsolutePath()
+//                        + "/dataset_recorder/" + MainActivity.folder_name + "/";
+                String path = "/sdcard/dataset/"+timeName + "/";
 
                 // Create export file
                 new File(path).mkdirs();
@@ -252,10 +302,10 @@ public class MainActivity extends AppCompatActivity {
                     BufferedWriter writer = new BufferedWriter(new FileWriter(dest, true));
 
                     // Master string of information
-                    String data = timestamp + ",images/" + timestamp + ".jpeg";
+                    String sdata = timestamp + ",images/" + timestamp + ".jpeg";
 
                     // Appends the string to the file and closes
-                    writer.write(data + "\n");
+                    writer.write(sdata + "\n");
                     writer.flush();
                     writer.close();
                 }
@@ -264,14 +314,16 @@ public class MainActivity extends AppCompatActivity {
                     System.err.println("IOException: " + ioe.getMessage());
                 }
 
+                String picDirPath = path + "/images/";
                 // Create folder name
                 filename = timestamp + ".jpeg";
-                path = Environment.getExternalStorageDirectory().getAbsolutePath()
-                        + "/dataset_recorder/" + MainActivity.folder_name + "/images/";
+//                path = Environment.getExternalStorageDirectory().getAbsolutePath()
+//                        + "/dataset_recorder/" + MainActivity.folder_name + "/images/";
+//                path = "/sdcard/dataset/" + timeName + "/";
 
                 // Create export file
-                new File(path).mkdirs();
-                dest = new File(path + filename);
+                new File(picDirPath).mkdirs();
+                dest = new File(picDirPath + filename);
 
                 // Export the file to disk
                 try {
@@ -285,9 +337,70 @@ public class MainActivity extends AppCompatActivity {
             }
 
             // Make sure we close the image
+
+
+//            try {
+//                if(lastFrameSpendTime > MS_PER_FRAME) {
+//                    sleepTime-=2;
+//                } else {
+//                    sleepTime++;
+//                }
+//                if(sleepTime < MS_PER_FRAME && sleepTime > 0){
+//                    Thread.sleep(sleepTime);
+//                }
+//
+//            } catch (InterruptedException e) {
+//                e.printStackTrace();
+//            }
+            Log.i("dvlee","last spend "+lastFrameSpendTime + "ms, sleep " + sleepTime);
+
             image.close();
         }
     };
+
+    private static byte[]  getYUV420Data(ByteBuffer yc, ByteBuffer uc, ByteBuffer vc,
+                         int w,  int h,
+                         int YRowStride,  int UVRowStride,  int UVPixelStride)
+    {
+        Log.i("dvlee","y data:"+yc.remaining()+" uv:" + uc.remaining());
+        Log.i("dvlee","image info: " + YRowStride + ":" + UVRowStride + ":" + UVPixelStride);
+        int dataSize = w*h*3/2;
+        byte []rez = new byte[dataSize];
+        int count=0;
+        for(int y=0;y<yc.remaining();y++)
+        {
+            rez[y]=yc.get(y);
+        }
+        for(int y = 0; y < vc.remaining(); y ++)
+        {
+//            if(y % 2 == 0){
+                int id = yc.remaining() + y;
+//                if(id < dataSize) {
+                    rez[id] = vc.get(y);
+//                }
+//            }
+        }
+
+//        for(int y = 0; y < uc.remaining(); y ++)
+//        {
+//            if(y % 2 == 1){
+//                int id = yc.remaining() + y*2 + 1;
+//                if(id < dataSize){
+//                    rez[id] = uc.get(y);
+//                }
+//            }
+//        }
+
+//        for(int y = 0; y < uc.remaining(); y ++)
+//        {
+//            rez[yc.remaining() + y*2 + 1] = uc.get(y);
+//        }
+//        for(int y = 0; y < vc.remaining(); y ++)
+//        {
+//            rez[yc.remaining() + y*2 ] = vc.get(y);
+//        }
+        return rez;
+    }
 
 
     @Override
